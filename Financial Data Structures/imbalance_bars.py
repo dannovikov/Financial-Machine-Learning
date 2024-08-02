@@ -1,7 +1,4 @@
 import pandas as pd
-from matplotlib import pyplot as plt
-from utils.classes.Prices import Prices
-from utils.algorithms.ewma import ewma
 
 
 def tick_imbalance_bars(data: pd.DataFrame, alpha: float, et_init=100) -> pd.DataFrame:
@@ -12,6 +9,7 @@ def tick_imbalance_bars(data: pd.DataFrame, alpha: float, et_init=100) -> pd.Dat
     Args:
         data: a dataframe containing "price" and "volume" columns
         alpha: decay factor for EWMA
+        et_init: initial value for expected number of ticks per bar
 
     Returns:
         A dataframe containing tick imbalance bars, which recast the price
@@ -77,7 +75,7 @@ def tick_imbalance_bars(data: pd.DataFrame, alpha: float, et_init=100) -> pd.Dat
     return pd.DataFrame(bars)
 
 
-def volume_imbalance_bars(data: pd.DataFrame, alpha: float) -> pd.DataFrame:
+def volume_imbalance_bars(data: pd.DataFrame, alpha: float, et_init=100) -> pd.DataFrame:
     """Get volume imbalance bars for a price series
 
     Implementation described in AFML 2.3.2.2 "Volume/Dollar Imbalance Bars"
@@ -85,6 +83,7 @@ def volume_imbalance_bars(data: pd.DataFrame, alpha: float) -> pd.DataFrame:
     Args:
         data: a dataframe containing "price" and "volume" columns
         alpha: decay factor for EWMA
+        et_init: initial value for expected number of ticks per bar
 
     Returns:
         A dataframe containing tick imbalance bars, which recast the price
