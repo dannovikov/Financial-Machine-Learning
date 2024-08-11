@@ -65,6 +65,7 @@ def tick_imbalance_bars(data: pd.DataFrame, alpha: float, et_init=100) -> pd.Dat
         if abs(theta) >= et * abs(2 * pb - 1):
             T = t - bars["end_idx"][-1]
             make_bar(bars["end_idx"][-1], t, data, bars)
+
             et = alpha * T + (1 - alpha) * et
             bar_pb = compute_bar_pb(b_hist)
             pb = alpha * bar_pb + (1 - alpha) * pb
@@ -91,6 +92,7 @@ def volume_imbalance_bars(data: pd.DataFrame, alpha: float, et_init=100) -> pd.D
     """
 
     def make_bar(start_idx, end_idx, data, bars):
+        # Creates a new bar from start_idx to end_idx
         bars["start_idx"].append(start_idx)
         bars["end_idx"].append(end_idx)
         bars["open"].append(data["price"][start_idx])
@@ -100,14 +102,14 @@ def volume_imbalance_bars(data: pd.DataFrame, alpha: float, et_init=100) -> pd.D
         bars["volume"].append(sum(data["volume"][start_idx:end_idx]))
 
     def compute_bar_v(b_hist, v_hist):
+        # Compute the volume of positive and negative ticks
         bar_vp = 0
         bar_vm = 0
         for i in range(len(b_hist)):
-            if b == 1:
+            if b_hist[i] == 1:
                 bar_vp += v_hist[i]
             else:
                 bar_vm += v_hist[i]
-        bar_vp /= len(b_hist)
         return bar_vp, bar_vm
 
     bars = {
@@ -120,39 +122,44 @@ def volume_imbalance_bars(data: pd.DataFrame, alpha: float, et_init=100) -> pd.D
         "volume": [data["volume"][0]],
     }
 
-    p = data["price"]
-    v = data["volume"]
-    b = 1
-    b_last = 1
-    b_hist = []
-    v_hist = []
-    theta = 0
+    p = data["price"]  # series of prices
+    v = data["volume"]  # series of volumes
 
-    et = 1
-    vp = 1
-    vm = 0
+    b = 1  # current tick direction
+    b_last = b  # last tick direction
+
+    b_hist = []  # history of tick directions
+    v_hist = []  # history of volumes
+    theta = 0  # tick imbalance
+
+    et = et_init  # expected number of ticks per bar
+    vp = 1  # expected volume of positive ticks
+    vm = 0  # expected volume of negative ticks
 
     for t in range(1, len(p)):
+        # compute tick direction
         dp = p[t] - p[t - 1]
         if dp == 0:
             b = b_last
         else:
             b = 1 if dp > 0 else -1
-            b_last = b
+        b_last = b
+
+        # update tick imbalance
         theta += b * v[t]
         b_hist.append(b)
+        v_hist.append(v[t])
 
-        if abs(theta) >= et * abs(vp - vm):
+        # check if a new bar is created
+        if abs(theta) >= et * abs(2 * vp - (vp + vm)):
             T = t - bars["end_idx"][-1]
-            # make bar
             make_bar(bars["end_idx"][-1], t, data, bars)
-            # update ewma
-            et = alpha * T + (1 - alpha) * et
+            # update expectations
             bar_vp, bar_vm = compute_bar_v(b_hist, v_hist)
             vp = alpha * bar_vp + (1 - alpha) * vp
             vm = alpha * bar_vm + (1 - alpha) * vm
-
-            # reset
+            et = alpha * T + (1 - alpha) * et
+            # reset tick imbalance
             b_hist = []
             v_hist = []
             theta = 0
