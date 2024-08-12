@@ -79,7 +79,8 @@ def tick_imbalance_bars(data: dict, alpha: float, et_init=100, verbose=True) -> 
 def volume_imbalance_bars(data: dict, alpha: float, et_init=100, verbose=True) -> dict:
     """Get volume imbalance bars for a price series
 
-    Implementation described in AFML 2.3.2.2 "Volume/Dollar Imbalance Bars"
+    As described in AFML 2.3.2.2 "Volume/Dollar Imbalance Bars", VIBs represent
+    the exceeding accumulation of signed volume w.r.t past expectations.
 
     Args:
         data: a dictionary containing "price" and "volume" lists
