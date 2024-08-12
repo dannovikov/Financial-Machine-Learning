@@ -1,20 +1,20 @@
-import pandas as pd
-
-
-def tick_imbalance_bars(data: pd.DataFrame, alpha: float, et_init=100) -> pd.DataFrame:
+def tick_imbalance_bars(data: dict, alpha: float, et_init=100, verbose=True) -> dict:
     """Get tick imbalance bars for a price series
 
-    Implementation described in AFML 2.3.2.1 "Tick Imbalance Bars"
+    As described in AFML 2.3.2.1 "Tick Imbalance Bars", TIBs represent
+    the exceeding accumulation of signed trades w.r.t past expectations.
 
     Args:
-        data: a dataframe containing "price" and "volume" columns
+        data: a dictionary containing "price" and "volume" lists
         alpha: decay factor for EWMA
         et_init: initial value for expected number of ticks per bar
+        verbose: whether to display a progress bar
 
     Returns:
-        A dataframe containing tick imbalance bars, which recast the price
+        A dictionary containing tick imbalance bars, which recast the price
         series into bars sized by information content.
     """
+    tqdm = _handle_verbose(verbose)
 
     def make_bar(start_idx, end_idx, data, bars):
         T = end_idx - start_idx
@@ -73,26 +73,30 @@ def tick_imbalance_bars(data: pd.DataFrame, alpha: float, et_init=100) -> pd.Dat
             b_hist = []
             theta = 0
 
-    return pd.DataFrame(bars)
+    return bars
 
 
-def volume_imbalance_bars(data: pd.DataFrame, alpha: float, et_init=100) -> pd.DataFrame:
+def volume_imbalance_bars(data: dict, alpha: float, et_init=100, verbose=True) -> dict:
     """Get volume imbalance bars for a price series
 
     Implementation described in AFML 2.3.2.2 "Volume/Dollar Imbalance Bars"
 
     Args:
-        data: a dataframe containing "price" and "volume" columns
+        data: a dictionary containing "price" and "volume" lists
         alpha: decay factor for EWMA
         et_init: initial value for expected number of ticks per bar
+        verbose: whether to display a progress bar
 
     Returns:
-        A dataframe containing tick imbalance bars, which recast the price
+        A dictionary containing tick imbalance bars, which recast the price
         series into bars sized by information content.
     """
 
+    tqdm = _handle_verbose(verbose)
+
     def make_bar(start_idx, end_idx, data, bars):
         # Creates a new bar from start_idx to end_idx
+        print(f"Making a new bar from {start_idx} to {end_idx}")
         bars["start_idx"].append(start_idx)
         bars["end_idx"].append(end_idx)
         bars["open"].append(data["price"][start_idx])
@@ -136,7 +140,7 @@ def volume_imbalance_bars(data: pd.DataFrame, alpha: float, et_init=100) -> pd.D
     vp = 1  # expected volume of positive ticks
     vm = 0  # expected volume of negative ticks
 
-    for t in range(1, len(p)):
+    for t in tqdm(range(1, len(p))):
         # compute tick direction
         dp = p[t] - p[t - 1]
         if dp == 0:
@@ -164,4 +168,24 @@ def volume_imbalance_bars(data: pd.DataFrame, alpha: float, et_init=100) -> pd.D
             v_hist = []
             theta = 0
 
-    return pd.DataFrame(bars)
+    return bars
+
+
+def _handle_verbose(verbose):
+    if verbose:
+        try:
+            from tqdm import tqdm  # type: ignore
+        except ImportError as e:
+            print("Please install tqdm for progress bar. Defaulting to verbose=False.")
+
+            def tqdm(x, *args, **kwargs):
+                for i in x:
+                    yield i
+
+    else:
+
+        def tqdm(x, *args, **kwargs):
+            for i in x:
+                yield i
+
+    return tqdm

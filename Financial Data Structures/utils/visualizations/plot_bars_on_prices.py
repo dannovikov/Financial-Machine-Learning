@@ -24,7 +24,7 @@ def plot_bars_on_prices(price_df, bars_df):
     )
 
     # Create line chart for price data
-    line = go.Scatter(x=price_df.index, y=price_df["price"], mode="lines", name="Price")
+    line = go.Scatter(x=list(range(len(price_df["price"]))), y=price_df["price"], mode="lines", name="Price")
 
     # Create figure
     fig = go.Figure()
