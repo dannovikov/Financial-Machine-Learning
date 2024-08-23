@@ -113,15 +113,26 @@ def volume_imbalance_bars(data: dict, alpha: float, et_init=100, max_bar_seconds
         bars["volume"].append(sum(data["volume"][start_idx:end_idx]))
 
     def compute_bar_v(b_hist, v_hist):
+        # vp = p[b=1] * E[v|b=1]
+        # vm = p[b=-1] * E[v|b=-1]
         bar_vp = 0
         bar_vm = 0
-        bar_pb = 0
+        num_pos = 0
+        num_neg = 0
+
         for i in range(len(b_hist)):
             if b_hist[i] == 1:
                 bar_vp += v_hist[i]
-                bar_pb += 1
-        bar_pb /= len(b_hist)
-        bar_vm = sum(v_hist) - bar_vp
+                num_pos += 1
+            else:
+                bar_vm += v_hist[i]
+                num_neg += 1
+
+        if num_pos > 0:
+            bar_vp /= num_pos
+        if num_neg > 0:
+            bar_vm /= num_neg
+
         return bar_vp, bar_vm
 
     bars = {
@@ -146,38 +157,41 @@ def volume_imbalance_bars(data: dict, alpha: float, et_init=100, max_bar_seconds
     theta = 0  # tick imbalance
 
     et = et_init  # expected number of ticks per bar
-    vp = et // 2  # expected volume of positive ticks
-    vm = et - vp  # expected volume of negative ticks
+    vp = et  # expected volume of positive ticks
+    vm = et  # expected volume of negative ticks
 
     last_bar_time = data["time"][0]
 
     c1, c2 = 0, 0
 
-    for t in tqdm(range(1, len(p)), desc=f"a={alpha:.2f}, et_init={et_init:.2f}"):
-        # compute tick direction
+    for t in tqdm(range(1, len(p))):
         dp = p[t] - p[t - 1]
-        if dp == 0:
-            b = b_last
+        if dp > 0:
+            b = 1
+        elif dp < 0:
+            b = -1
         else:
-            b = 1 if dp > 0 else -1
+            b = b_last
         b_last = b
 
-        # update tick imbalance
         theta += b * v[t]
+
         b_hist.append(b)
         v_hist.append(v[t])
 
         current_time = times[t]
 
+        if t > 70000:
+            pass
+
         # check if a new bar is created
-        if abs(theta) >= et * abs(vp - vm) or current_time - last_bar_time > max_bar_seconds:
-            if current_time - last_bar_time > max_bar_seconds:
-                c2 += 1
-            else:
-                c1 += 1
+        if abs(theta) >= et * abs(vp - vm):  # or current_time - last_bar_time > max_bar_seconds:
+            # if current_time - last_bar_time > max_bar_seconds:
+            #     c2 += 1
+            # else:
+            #     c1 += 1
             T = t - bars["end_idx"][-1]
             make_bar(bars["end_idx"][-1], t, data, bars)
-            # update expectations
             bar_vp, bar_vm = compute_bar_v(b_hist, v_hist)
             vp = alpha * bar_vp + (1 - alpha) * vp
             vm = alpha * bar_vm + (1 - alpha) * vm
@@ -219,7 +233,7 @@ if __name__ == "__main__":
 
     print(os.getcwd())
 
-    filtered_csv = "Historical Data/ES-Futures-Ticks-20230807-20240806.trades.filtered.csv"  # now input
+    filtered_csv = "../../Historical Data/ES-Futures-Ticks-20230807-20240806.trades.filtered.csv"  # now input
 
     data = {"time": [], "price": [], "volume": [], "symbol": []}
     with open(filtered_csv, "r") as f:
@@ -233,59 +247,130 @@ if __name__ == "__main__":
             data["price"].append(float(line[1]))
             data["volume"].append(float(line[2]))
             data["symbol"].append(line[3])
+
+    import pandas as pd
+
+    bars = volume_imbalance_bars(data, alpha=0.05, et_init=1000, verbose=True)
+    print(pd.DataFrame(bars), len(bars))
+
+    import pandas as pd
+    import plotly.graph_objects as go
+
+    def plot_bars_on_prices(price_df, bars_df):
+        """
+        Plot tick imbalance bars on the price chart using Plotly.
+
+        Args:
+            price_df: a dataframe containing "price" and "volume" columns.
+            bars_df: a dataframe containing tick imbalance bars with columns
+                    "start_idx", "end_idx", "open", "high", "low", "close", "volume".
+        """
+        # Create candlestick chart for tick imbalance bars
+        candlestick = go.Candlestick(
+            x=bars_df["end_idx"],  # Use end_idx for x values
+            open=bars_df["open"],
+            high=bars_df["high"],
+            low=bars_df["low"],
+            close=bars_df["close"],
+            increasing_line_color="green",
+            decreasing_line_color="red",
+            name="Tick Imbalance Bars",
+        )
+
+        # Create line chart for price data
+        line = go.Scatter(x=list(range(len(price_df["price"]))), y=price_df["price"], mode="lines", name="Price")
+
+        # Create figure
+        fig = go.Figure()
+
+        # Add line chart
+        fig.add_trace(line)
+
+        # Add candlestick chart
+        fig.add_trace(candlestick)
+
+        # Add rectangles to reflect the number of ticks in the bar width
+        fig.update_layout(
+            title="Tick Imbalance Bars on Price Chart",
+            xaxis_title="Ticks",
+            yaxis_title="Price",
+            xaxis=dict(rangeslider=dict(visible=False)),
+            shapes=[
+                dict(
+                    x0=row["start_idx"],
+                    x1=row["end_idx"],
+                    y0=row["low"],
+                    y1=row["high"],
+                    type="rect",
+                    xref="x",
+                    yref="y",
+                    line=dict(color="green" if row["open"] <= row["close"] else "red"),
+                )
+                for idx, row in bars_df.iterrows()
+            ],
+        )
+
+        # Show the figure
+        fig.show()
+
+        # Example usage
+        # plot_tick_imbalance_bars_on_prices(df, bars)
+
+    plot_bars_on_prices(data, pd.DataFrame(bars))
+
     # lets try many values for alpha and et_init
     # lets vary alpha from 0.01 to 0.05, 10 values
-    # lets vary et_init from 1 to 25, 10 values
-    alphas = np.linspace(0.01, 0.03, 10)
-    et_inits = np.linspace(1, 25, 10)
-    results = {}
-    results2 = {}
-    # bars = volume_imbalance_bars(data, alpha=0.05, et_init=10, verbose=True)
-    count = 0
-    for a in tqdm(alphas):
-        for e in et_inits:
-            # print(f"{count}/{len(alphas) * len(et_inits)}")
-            count += 1
-            bars = volume_imbalance_bars(data, alpha=a, et_init=e, verbose=False)
-            # results[(a, e)] = len(bars["start_idx"])
-            results[(a, len(bars["start_idx"]))] = sum(
-                [bars["start_idx"][i + 1] - bars["start_idx"][i] for i in range(len(bars["start_idx"]) - 1)]
-            ) / len(bars["start_idx"])
-            results2[(a, e)] = len(bars["start_idx"])
+    # # lets vary et_init from 1 to 25, 10 values
+    # alphas = np.linspace(0.01, 0.03, 10)
+    # et_inits = np.linspace(1, 25, 10)
+    # results = {}
+    # results2 = {}
+    # # bars = volume_imbalance_bars(data, alpha=0.05, et_init=10, verbose=True)
+    # count = 0
+    # for a in tqdm(alphas):
+    #     for e in et_inits:
+    #         # print(f"{count}/{len(alphas) * len(et_inits)}")
+    #         count += 1
+    #         bars = volume_imbalance_bars(data, alpha=a, et_init=e, verbose=False)
+    #         # results[(a, e)] = len(bars["start_idx"])
+    #         results[(a, len(bars["start_idx"]))] = sum(
+    #             [bars["start_idx"][i + 1] - bars["start_idx"][i] for i in range(len(bars["start_idx"]) - 1)]
+    #         ) / len(bars["start_idx"])
+    #         results2[(a, e)] = len(bars["start_idx"])
 
-    for r in results.items():
-        print(r)
-    # 3d plot of results
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection="3d")
-    x = [x[0] for x in results.keys()]
-    y = [x[1] for x in results.keys()]
-    z = list(results.values())
-    ax.scatter(x, y, z)
-    # plot bars as a function of alpha and et_init
-    # ax.plot_trisurf(x, y, z, cmap="viridis")
-    ax.set_xlabel("alpha")
-    ax.set_ylabel("et_init")
-    ax.set_zlabel("num_bars")  # type: ignore
-    plt.show()
-
-    # # a new 2d plot of results.keys[1] vs results.values()
+    # for r in results.items():
+    #     print(r)
+    # # 3d plot of results
     # fig = plt.figure()
-    # ax = fig.add_subplot(111)
-    # x = [x[1] for x in results.keys()]
-    # y = list(results.values())
-    # ax.scatter(x, y)
-    # ax.set_ylabel("index gap")
-    # ax.set_xlabel("number of bars")
-
+    # ax = fig.add_subplot(111, projection="3d")
+    # x = [x[0] for x in results.keys()]
+    # y = [x[1] for x in results.keys()]
+    # z = list(results.values())
+    # ax.scatter(x, y, z)
+    # # plot bars as a function of alpha and et_init
+    # # ax.plot_trisurf(x, y, z, cmap="viridis")
+    # ax.set_xlabel("alpha")
+    # ax.set_ylabel("et_init")
+    # ax.set_zlabel("num_bars")  # type: ignore
     # plt.show()
 
-    # plot results1 values as a function of results2 values
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    x = list(results2.values())
-    y = list(results.values())
-    ax.scatter(x, y)
-    ax.set_ylabel("mean bar size")
-    ax.set_xlabel("number of bars")
-    plt.show()
+    # # # a new 2d plot of results.keys[1] vs results.values()
+    # # fig = plt.figure()
+    # # ax = fig.add_subplot(111)
+    # # x = [x[1] for x in results.keys()]
+    # # y = list(results.values())
+    # # ax.scatter(x, y)
+    # # ax.set_ylabel("index gap")
+    # # ax.set_xlabel("number of bars")
+
+    # # plt.show()
+
+    # # plot results1 values as a function of results2 values
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111)
+    # x = list(results2.values())
+    # y = list(results.values())
+    # ax.scatter(x, y)
+    # ax.set_ylabel("mean bar size")
+    # ax.set_xlabel("number of bars")
+    # plt.show()
