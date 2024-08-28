@@ -37,8 +37,11 @@ class IBApi(EWrapper, EClient):
         self.qty = 0
         self.open_price = 0
         self.open_dir = None
+        self.open_time = 0
+        self.max_open_time = float("inf")
+
         self.leverage = 50  # ES futures leverage
-        self.commission = 2.25  # ES commission per contract per side
+        self.commission = 2.25  # 0.62  # ES commission per contract per side
         self.trade_cost = self.commission * 2 / self.leverage  # for setting buy/sell bands
 
         self.current_profit = 0
@@ -127,7 +130,7 @@ def mean_reversion(app):
     ax.set_xlabel("Time")
     ax.set_ylabel("Price")
 
-    window = 600  # at 4 ticks per second
+    window = 480  # at 4 ticks per second
     prices = deque(maxlen=window)
 
     histlen = 2400
@@ -136,7 +139,7 @@ def mean_reversion(app):
     lower_band = deque(maxlen=histlen)
     price_history = deque(maxlen=histlen)
 
-    def update(_):
+    def tick(_):
         prices.append(app.last_price)
         price_history.append(app.last_price)
 
@@ -149,32 +152,61 @@ def mean_reversion(app):
 
         if app.qty == 1:
             app.current_profit = (app.last_price - app.open_price) * app.leverage - app.commission
+            app.open_time += 1
         elif app.qty == -1:
             app.current_profit = (app.open_price - app.last_price) * app.leverage - app.commission
+            app.open_time += 1
+
+        # time limit condition for closing position
+        if app.open_time > app.max_open_time:
+            if app.qty == 1:
+                app.sell(contract, 1)
+                app.qty = 0
+                app.mean_side = "over"
+                print("Time is up. Selling 1 contract.")
+                app.open_time = 0
+            elif app.qty == -1:
+                app.buy(contract, 1)
+                app.qty = 0
+                app.mean_side = "under"
+                print("Time is up. Buying 1 contract.")
+                app.open_time = 0
+
+        # sma cross condition for closing position
+        if len(prices) == window:
+            # use the open price and the sma
+            # close when the open price crosses the sma
+            # if qty is 1, then we started above the sma and close when its below
+            # and vice versa
+
+            if app.qty == 1:
+                if app.open_price < mu:
+                    app.sell(contract, 1)
+                    app.qty = 0
+                    app.open_time = 0
+                    print("Open price crossed the mean. Selling 1 contract.")
 
         if len(prices) == window:
             if app.qty == 0:
                 if app.last_price < lower_band[-1] - app.trade_cost:
                     app.buy(contract, 1)
                     app.qty = 1
-                    app.mean_side = "under"
                     print("Price is under the lower band. Buying 1 contract.")
                 elif app.last_price > upper_band[-1] + app.trade_cost:
                     app.sell(contract, 1)
                     app.qty = -1
-                    app.mean_side = "over"
                     print("Price is over the upper band. Selling 1 contract.")
             elif app.qty == 1:
-                if app.last_price >= mu and app.mean_side == "under":
+                if app.last_price >= mu:
                     app.sell(contract, 1)
                     app.qty = 0
-                    app.mean_side = "over"
+                    app.open_time = 0
                     print("Price is above the mean. Selling 1 contract.")
             elif app.qty == -1:
-                if app.last_price <= mu and app.mean_side == "over":
+                if app.last_price <= mu:
                     app.buy(contract, 1)
                     app.qty = 0
-                    app.mean_side = "under"
+                    app.open_time = 0
                     print("Price is below the mean. Buying 1 contract.")
 
         # --- Plotting ---
@@ -192,11 +224,11 @@ def mean_reversion(app):
             ax.hlines(app.open_price, 0, len(price_history), label=f"Open Price {app.open_price:.2f}", color="forestgreen" if app.qty == 1 else "firebrick")
         ax.plot([], [], " ", label=f"PnL {app.total_profit:.2f}")  # Invisible line with total profit label
         ax.fill_between(x, lower_band, upper_band, color="gray", alpha=0.2)
-        ax.set_ylim(lower_band[-1] - app.trade_cost - 10, upper_band[-1] + app.trade_cost + 10)
-        ax.legend(ncol=5, loc="upper center")
+        ax.set_ylim(lower_band[-1] - app.trade_cost - 2, upper_band[-1] + app.trade_cost + 2)
+        ax.legend(ncol=3, loc="upper center")
         # -----------------
 
-    ani = animation.FuncAnimation(fig, update, interval=250, cache_frame_data=False)
+    ani = animation.FuncAnimation(fig, tick, interval=250, cache_frame_data=False)
     plt.show()
 
 
@@ -209,7 +241,7 @@ time.sleep(1)  # Sleep to ensure connection is established
 
 # Define the ES continuous futures contract
 contract = Contract()
-contract.symbol = "ES"
+contract.symbol = "ES"  # "MES"
 contract.secType = "FUT"
 contract.exchange = "CME"
 contract.currency = "USD"
