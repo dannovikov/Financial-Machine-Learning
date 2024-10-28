@@ -20,7 +20,8 @@ class IBApi(EWrapper, EClient):
             "LAST_SIZE": 5,
             "VOLUME": 8,
         }
-        self.order_id = 0  # To track orders
+
+        # Current price and volume
         self.bid_price = 0
         self.bid_size = 0
         self.ask_price = 0
@@ -28,21 +29,25 @@ class IBApi(EWrapper, EClient):
         self.last_price = 0
         self.last_size = 0
 
+        # Contract details
         self.contract = contract
         self.leverage = 50  # 5  # ES futures leverage
         self.commission = 2.25  # 0.62  # ES commission per contract per side
         self.trade_cost = self.commission * 2 / self.leverage  # for setting buy/sell bands
 
+        # Position details
         self.qty = 0
         self.prev_qty = 0
         self.open_price = 0
         self.open_dir = None
         self.open_time = 0
+        self._last_permid = None
+        self.order_id = 0  # To track orders
 
+        # Profit details
         self.current_profit = 0
         self.guarenteed_profit = 0
         self.total_profit = 0
-        self._last_permid = None
 
         self.stop_loss = -2 * self.leverage  # stop loss in dollars
         self.max_open_time = 300  # max number of ticks to hold a position
@@ -51,6 +56,11 @@ class IBApi(EWrapper, EClient):
 
         self.cooldown = 0
         self.strategy = "trend_following"
+
+        # measure how often our order_price != fill_price
+        self.order_price = 0
+        self.slipped_trades = 0
+        self.total_trades = 0
 
     def nextValidId(self, orderId):
         super().nextValidId(orderId)
@@ -61,7 +71,20 @@ class IBApi(EWrapper, EClient):
         self.prev_qty = self.qty  # Track current position before change
         self.qty = new_qty  # Update to reflect new position
 
-    def orderStatus(self, orderId, status, filled, remaining, avgFillPrice, permId, parentId, lastFillPrice, clientId, whyHeld, mktCapPrice):
+    def orderStatus(
+        self,
+        orderId,
+        status,
+        filled,
+        remaining,
+        avgFillPrice,
+        permId,
+        parentId,
+        lastFillPrice,
+        clientId,
+        whyHeld,
+        mktCapPrice,
+    ):
         if status == "Filled":
             if permId == self._last_permid:
                 return
@@ -83,11 +106,15 @@ class IBApi(EWrapper, EClient):
             elif self.qty == 1 and self.prev_qty == 0:
                 # Opened a new long position
                 self.open_price = avgFillPrice
+                if self.order_price != avgFillPrice:
+                    self.slipped_trades += 1
                 print(f"Opened long position at {avgFillPrice}")
 
             elif self.qty == -1 and self.prev_qty == 0:
                 # Opened a new short position
                 self.open_price = avgFillPrice
+                if self.order_price != avgFillPrice:
+                    self.slipped_trades += 1
                 print(f"Opened short position at {avgFillPrice}")
 
             elif self.qty == 0 and self.prev_qty == 1:
@@ -95,6 +122,8 @@ class IBApi(EWrapper, EClient):
                 profit = (avgFillPrice - self.open_price) * self.leverage - self.commission * 2
                 self.total_profit += profit
                 self.open_price = 0  # Reset since position is closed
+                if self.order_price != avgFillPrice:
+                    self.slipped_trades += 1
                 print(f"Closed long position. Profit: {profit:.2f}, Total PnL: {self.total_profit:.2f}")
 
             elif self.qty == 0 and self.prev_qty == -1:
@@ -102,7 +131,11 @@ class IBApi(EWrapper, EClient):
                 profit = (self.open_price - avgFillPrice) * self.leverage - self.commission * 2
                 self.total_profit += profit
                 self.open_price = 0  # Reset since position is closed
+                if self.order_price != avgFillPrice:
+                    self.slipped_trades += 1
                 print(f"Closed short position. Profit: {profit:.2f}, Total PnL: {self.total_profit:.2f}")
+
+            self.total_trades += 1
 
     def pnl(self, reqId: int, dailyPnL: float, unrealizedPnL: float, realizedPnL: float):
         print(f"Daily PnL: {dailyPnL}, Unrealized PnL: {unrealizedPnL}, Realized PnL: {realizedPnL}")
@@ -133,7 +166,9 @@ class IBApi(EWrapper, EClient):
 
     def subscribe_to_market_data(self, contract):
         """Subscribe to live market data."""
-        self.reqMktData(reqId=1, contract=contract, genericTickList="", snapshot=False, regulatorySnapshot=False, mktDataOptions=[])
+        self.reqMktData(
+            reqId=1, contract=contract, genericTickList="", snapshot=False, regulatorySnapshot=False, mktDataOptions=[]
+        )
 
     def place_order(self, contract, order):
         self.placeOrder(self.order_id, contract, order)
@@ -150,8 +185,8 @@ class IBApi(EWrapper, EClient):
     def create_order(self, action, qty, price=None):
         order = Order()
         order.action = action
-        order.totalQuantity = qty
         order.orderType = "LMT" if price else "MKT"
+        order.totalQuantity = qty
         if price:
             order.lmtPrice = price
         return order
@@ -209,6 +244,7 @@ class IBApi(EWrapper, EClient):
             wait_time = 0
             print(f"Waiting for price data... {wait_time} s\r", end="")
             time.sleep(1)
+            wait_time += 1
         print(" " * 50, end="\r")
 
     def update_current_profit(self):
