@@ -302,9 +302,7 @@ def mean_reversion_with_ema(app, boll_window=600, width=2, alpha=0.01):
     plt.show()
 
 
-def trend_following_with_cooldown(
-    app, slow_alpha=0.01, fast_alpha=0.1, take_profit_alpha=0.015, entry_threshold=0.50, exit_cooldown=60
-):
+def trend_following_with_cooldown(app, slow_alpha=0.01, fast_alpha=0.1, take_profit_alpha=0.015, entry_threshold=0.50, exit_cooldown=60):
     history = 1200
     open_cooldown = 4
 
@@ -484,9 +482,7 @@ def trend_following(app, slow_alpha=0.01, fast_alpha=0.1, take_profit_alpha=0.01
     plt.show()
 
 
-def crypto_trend_following_with_no_naked_shorts(
-    app, slow_alpha=0.01, fast_alpha=0.1, take_profit_alpha=0.015, entry_macd=0.50
-):
+def crypto_trend_following_with_no_naked_shorts(app, slow_alpha=0.01, fast_alpha=0.1, take_profit_alpha=0.015, entry_macd=0.50):
     history = 1200
     price_history = deque(maxlen=history)
     slow_emas = deque(maxlen=history)
@@ -834,9 +830,7 @@ def trend_with_bollinger_breakout(app, boll_window=150, slow_alpha=0.01, fast_al
     plt.show()
 
 
-def mean_rev_within_boll_and_trend_on_breakout(
-    app, boll_window=500, slow_alpha=0.01, fast_alpha=0.1, take_profit_alpha=0.015
-):
+def mean_rev_within_boll_and_trend_on_breakout(app, boll_window=500, slow_alpha=0.01, fast_alpha=0.1, take_profit_alpha=0.015):
     history = 1200
     open_cooldown = 4
     cooldown = 15
@@ -1082,6 +1076,119 @@ def mean_reversion_with_ema_deviation_sensitive(app, ema_alpha_init, boll_window
     plt.show()
 
 
+def mean_reversion_with_trend_shutoff(app, boll_window=600, width=2, slow_alpha=0.001, fast_alpha=0.01, stop_macd=1):
+    history = 2400
+    cooldown = 100
+
+    prices = deque(maxlen=boll_window)
+    price_history = deque(maxlen=history)
+    bid_history = deque(maxlen=history)
+    ask_history = deque(maxlen=history)
+    upper_bands = deque(maxlen=history)
+    lower_bands = deque(maxlen=history)
+    sma = deque(maxlen=history)
+
+    slow_emas = deque(maxlen=history)
+    fast_emas = deque(maxlen=history)
+
+    # append last_price to all the deques
+    prices.append(app.last_price)
+    price_history.append(app.last_price)
+    bid_history.append(app.bid_price)
+    ask_history.append(app.ask_price)
+    upper_bands.append(app.last_price)
+    lower_bands.append(app.last_price)
+    sma.append(app.last_price)
+    slow_emas.append(app.last_price)
+    fast_emas.append(app.last_price)
+
+    def tick(ax, plotting=True):
+        app.update_current_profit()
+
+        mu = np.mean(prices)
+        std = np.std(prices)
+        upper_band = mu + width * std + app.trade_cost
+        lower_band = mu - width * std - app.trade_cost
+        slow_ema = slow_alpha * app.last_price + (1 - slow_alpha) * slow_emas[-1]
+        fast_ema = fast_alpha * app.last_price + (1 - fast_alpha) * fast_emas[-1]
+        macd = fast_ema - slow_ema
+
+        prices.append(app.last_price)
+        price_history.append(app.last_price)
+
+        bid_history.append(app.bid_price)
+        ask_history.append(app.ask_price)
+
+        sma.append(mu)
+
+        slow_emas.append(slow_ema)
+        fast_emas.append(fast_ema)
+
+        upper_bands.append(upper_band)
+        lower_bands.append(lower_band)
+
+        if app.qty != 0:
+            app.open_time += 1
+
+        if len(prices) == boll_window and app.cooldown == 0:
+            if app.qty == 0 and abs(macd) < stop_macd:
+                # if app.last_price < lower_band:
+                if app.ask_price < lower_band:
+                    app.order_price = app.ask_price
+                    app.open_long_position()
+                # elif app.last_price > upper_band:
+                elif app.bid_price > upper_band:
+                    app.order_price = app.bid_price
+                    app.open_short_position()
+            elif app.qty == 1:
+                if app.last_price >= mu or abs(macd) > stop_macd:
+                    app.order_price = app.last_price
+                    app.close_long_position()
+            elif app.qty == -1:
+                if app.last_price <= mu or abs(macd) > stop_macd:
+                    app.order_price = app.last_price
+                    app.close_short_position()
+
+        if app.cooldown > 0:
+            app.cooldown -= 1
+
+        if plotting:
+            x_axis = range(len(price_history))
+            ax.clear()
+            ax.plot(x_axis, price_history, label=f"Price {app.last_price:.2f}", color="blue")
+            ax.plot(x_axis, upper_bands, label=f"Upper Band {upper_bands[-1]:.2f}", color="purple")
+            ax.plot(x_axis, lower_bands, label=f"Lower Band {lower_bands[-1]:.2f}", color="purple")
+            ax.plot(x_axis, slow_emas, label=f"{slow_alpha} Slow EMA {slow_ema:.2f}", color="lightcoral")
+            ax.plot(x_axis, fast_emas, label=f"{fast_alpha} Fast EMA {fast_ema:.2f}", color="navajowhite")
+            ax.plot(x_axis, sma, label=f"SMA {mu:.2f}", color="darkgrey")
+            ax.plot([], [], " ", label=f"PnL {app.total_profit:.2f}")
+            ax.plot([], [], " ", label=f"std: {std:.2f}")
+            # ax.plot([], [], " ", label=f"RSI: {rsi:.2f}")
+            ax.plot([], [], " ", label=f"Slippage rate: {app.slipped_trades/(app.total_trades+1e-8):.2f}")
+            if app.qty != 0:
+                ax.plot([], [], " ", label=f"Current Profit {app.current_profit:.2f}")
+                ax.plot([], [], " ", label=f"Open Time {app.open_time}/{app.max_open_time}")
+                ax.hlines(
+                    app.open_price,
+                    0,
+                    len(price_history),
+                    label=f"Open Price {app.open_price:.2f}",
+                    color="forestgreen" if app.qty == 1 else "firebrick",
+                )
+            ax.plot([], [], " ", label=f"MACD {macd:.2f}")
+            if app.cooldown > 0:
+                ax.plot([], [], " ", label=f"Cooldown {app.cooldown}/{cooldown}")
+            ax.fill_between(x_axis, lower_bands, upper_bands, color="gray", alpha=0.2)
+            ax.set_ylim(lower_bands[-1] - app.trade_cost - 2, upper_bands[-1] + app.trade_cost + 2)
+            ax.legend(ncol=3, loc="upper center")
+
+    fig, ax = plt.subplots()
+    while True:
+        tick(ax)
+        plt.pause(0.25)
+    plt.show()
+
+
 # Define the ES continuous futures contract
 contract = Contract()
 contract.symbol = "ES"  # "MES"
@@ -1140,7 +1247,9 @@ print("Prices received")
 # mean_reversion_at_the_bands(app, 600, None, 2)
 
 
-slow = 0.002
-fast = 0.0314
-take_profit = fast / 3
-trend_following(app, slow_alpha=slow, fast_alpha=fast, take_profit_alpha=take_profit, entry_macd=0.82)
+slow = 0.005
+fast = 0.04
+take_profit = (slow + fast) / 2
+entry_macd = 0.5
+trend_following(app, slow_alpha=slow, fast_alpha=fast, take_profit_alpha=take_profit, entry_macd=entry_macd)
+# mean_reversion_with_trend_shutoff(app, 600, 2, 0.001, 0.01, 1)
