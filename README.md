@@ -13,6 +13,15 @@ Contents:
             - Volume/Dollar Runs Bars
 
 
-- Intrinsic Value Estimation
-- Pairs Trading
-
+- Trading
+    - Basic trading strategies for mean reversion and trend following
+    - API class for integration with Interactive Brokers to send orders and get real time market data
+    - Visualizing the trading strategies, watch how they run on realtime data
+ 
+- Backtesting
+    - Simulating strategy performance on historical data 
+    - Variable data sampling rate, i.e. sample the price every 1/4 second.
+    - Modeling slippage, commissions, and transaction costs
+    - Visualizing the model on historical data, as if it were live (variable playback speed)
+    - Testing new strategies
+  
